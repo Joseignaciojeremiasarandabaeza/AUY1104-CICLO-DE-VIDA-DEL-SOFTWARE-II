@@ -21,18 +21,17 @@ on:
         default: 'us-east-1'
 
 env:
-  # Elimina la advertencia de Node.js 20
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # Valores por defecto para evitar el Error 254 en disparadores 'push'
-  DEFAULT_REGION: 'us-east-1'
-  DEFAULT_CLUSTER: 'duoc-eks-cluster-cli'
+  # Valores de respaldo para cuando el disparo es por 'push'
+  DEF_REGION: 'us-east-1'
+  DEF_CLUSTER: 'duoc-eks-cluster-cli'
 
 jobs:
   deploy-strategy:
     runs-on: ubuntu-latest
     permissions:
       contents: read 
-
+    
     steps:
       - name: Checkout Código
         uses: actions/checkout@v4
@@ -43,49 +42,54 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          # Si es push, usa DEFAULT_REGION. Si es manual, usa el input.
-          aws-region: ${{ github.event.inputs.aws_region || env.DEFAULT_REGION }}
+          # Si no hay input (push), usa la región por defecto
+          aws-region: ${{ github.event.inputs.aws_region || env.DEF_REGION }}
 
       - name: Configurar Kubectl para EKS
-        run: |
-          # Asignamos valores evitando nulos que causan el Exit Code 254
-          CNAME="${{ github.event.inputs.eks_cluster_name || env.DEFAULT_CLUSTER }}"
-          REGION="${{ github.event.inputs.aws_region || env.DEFAULT_REGION }}"
-          
-          echo "Conectando al cluster $CNAME en $REGION..."
-          aws eks update-kubeconfig --name "$CNAME" --region "$REGION"
+        uses: aws-actions/eks-set-context@v4
+        with:
+          cluster-name: ${{ github.event.inputs.eks_cluster_name || env.DEF_CLUSTER }}
+          aws-region: ${{ github.event.inputs.aws_region || env.DEF_REGION }}
       
-      # 1. ROLLING UPDATE (Se ejecuta en PUSH o si se elige manualmente)
+      # -----------------------------------------------------------
+      # 1. ROLLING UPDATE (Default en Push)
+      # -----------------------------------------------------------
       - name: 🔄 Ejecutar Rolling Update
         if: ${{ github.event.inputs.strategy == 'rolling-update' || github.event_name == 'push' }}
         run: |
-          echo "Iniciando Rolling Update..."
+          echo "Aplicando Rolling Update..."
           kubectl apply -f k8s/rolling-update.yaml
           kubectl rollout status deployment/duoc-app-rolling --timeout=300s
 
+      # -----------------------------------------------------------
       # 2. RECREATE
+      # -----------------------------------------------------------
       - name: ❌ Ejecutar Recreate
         if: ${{ github.event.inputs.strategy == 'recreate' }}
         run: |
-          echo "Iniciando Recreate..."
+          echo "Aplicando Recreate..."
           kubectl apply -f k8s/recreate.yaml
           kubectl rollout status deployment/duoc-app-recreate --timeout=300s
           
+      # -----------------------------------------------------------
       # 3. BLUE/GREEN
+      # -----------------------------------------------------------
       - name: 🟦 Ejecutar Blue/Green
         if: ${{ github.event.inputs.strategy == 'blue-green' }}
         run: |
+          # CORRECCIÓN: Definir variables de shell correctamente
           DEPLOYMENT_GREEN_NAME="duoc-app-green"
           SERVICE_NAME="duoc-app-bg-service"
           YAML_FILE_GREEN="k8s/blue-green-green.yaml"
           
           kubectl apply -f $YAML_FILE_GREEN
           kubectl rollout status deployment/$DEPLOYMENT_GREEN_NAME --timeout=300s
-          echo "Esperando 120s para validación..."
           sleep 120
-          kubectl patch service $SERVICE_NAME -p "{\"spec\": {\"selector\": {\"version\": \"green\"}}}"
+          kubectl patch service $SERVICE_NAME -p '{"spec": {"selector": {"version": "green"}}}'
 
+      # -----------------------------------------------------------
       # 4. CANARY
+      # -----------------------------------------------------------
       - name: 🐥 Ejecutar Canary
         if: ${{ github.event.inputs.strategy == 'canary' }}
         run: |
@@ -96,7 +100,6 @@ jobs:
           
           kubectl apply -f $YAML_FILE_CANARY
           kubectl rollout status deployment/$DEPLOYMENT_CANARY_NAME --timeout=300s
-          echo "Esperando 120s para validación..."
           sleep 120
           kubectl scale deployment/$DEPLOYMENT_CANARY_NAME --replicas=$TOTAL_REPLICAS
           kubectl scale deployment/$STABLE_DEPLOYMENT_NAME --replicas=0
