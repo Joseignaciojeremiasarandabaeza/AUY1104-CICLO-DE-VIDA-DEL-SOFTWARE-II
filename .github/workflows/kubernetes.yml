@@ -21,9 +21,9 @@ on:
         default: 'us-east-1'
 
 env:
-  # Solución al error de Node.js 20/24
+  # Elimina la advertencia de Node.js 20
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # Definimos constantes para evitar que el 'push' falle por falta de inputs
+  # Valores por defecto para evitar el Error 254 en disparadores 'push'
   DEFAULT_REGION: 'us-east-1'
   DEFAULT_CLUSTER: 'duoc-eks-cluster-cli'
 
@@ -43,20 +43,23 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          # Usamos el input si existe, si no, la región por defecto
+          # Si es push, usa DEFAULT_REGION. Si es manual, usa el input.
           aws-region: ${{ github.event.inputs.aws_region || env.DEFAULT_REGION }}
 
       - name: Configurar Kubectl para EKS
         run: |
-          CLUSTER_NAME=${{ github.event.inputs.eks_cluster_name || env.DEFAULT_CLUSTER }}
-          REGION_NAME=${{ github.event.inputs.aws_region || env.DEFAULT_REGION }}
-          aws eks update-kubeconfig --name $CLUSTER_NAME --region $REGION_NAME
+          # Asignamos valores evitando nulos que causan el Exit Code 254
+          CNAME="${{ github.event.inputs.eks_cluster_name || env.DEFAULT_CLUSTER }}"
+          REGION="${{ github.event.inputs.aws_region || env.DEFAULT_REGION }}"
+          
+          echo "Conectando al cluster $CNAME en $REGION..."
+          aws eks update-kubeconfig --name "$CNAME" --region "$REGION"
       
-      # 1. ROLLING UPDATE (Estrategia por defecto en PUSH)
+      # 1. ROLLING UPDATE (Se ejecuta en PUSH o si se elige manualmente)
       - name: 🔄 Ejecutar Rolling Update
         if: ${{ github.event.inputs.strategy == 'rolling-update' || github.event_name == 'push' }}
         run: |
-          echo "Aplicando YAML para Rolling Update..."
+          echo "Iniciando Rolling Update..."
           kubectl apply -f k8s/rolling-update.yaml
           kubectl rollout status deployment/duoc-app-rolling --timeout=300s
 
@@ -64,7 +67,7 @@ jobs:
       - name: ❌ Ejecutar Recreate
         if: ${{ github.event.inputs.strategy == 'recreate' }}
         run: |
-          echo "Aplicando YAML para Recreate..."
+          echo "Iniciando Recreate..."
           kubectl apply -f k8s/recreate.yaml
           kubectl rollout status deployment/duoc-app-recreate --timeout=300s
           
@@ -75,8 +78,10 @@ jobs:
           DEPLOYMENT_GREEN_NAME="duoc-app-green"
           SERVICE_NAME="duoc-app-bg-service"
           YAML_FILE_GREEN="k8s/blue-green-green.yaml"
+          
           kubectl apply -f $YAML_FILE_GREEN
           kubectl rollout status deployment/$DEPLOYMENT_GREEN_NAME --timeout=300s
+          echo "Esperando 120s para validación..."
           sleep 120
           kubectl patch service $SERVICE_NAME -p "{\"spec\": {\"selector\": {\"version\": \"green\"}}}"
 
@@ -88,8 +93,10 @@ jobs:
           STABLE_DEPLOYMENT_NAME="duoc-app-stable-v1"
           YAML_FILE_CANARY="k8s/canary-v2.yaml"
           TOTAL_REPLICAS=3
+          
           kubectl apply -f $YAML_FILE_CANARY
           kubectl rollout status deployment/$DEPLOYMENT_CANARY_NAME --timeout=300s
+          echo "Esperando 120s para validación..."
           sleep 120
           kubectl scale deployment/$DEPLOYMENT_CANARY_NAME --replicas=$TOTAL_REPLICAS
           kubectl scale deployment/$STABLE_DEPLOYMENT_NAME --replicas=0
