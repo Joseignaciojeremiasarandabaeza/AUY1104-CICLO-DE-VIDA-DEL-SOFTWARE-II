@@ -20,6 +20,10 @@ on:
         required: true
         default: 'us-east-1'
 
+env:
+  # Optamos por Node.js 24 para eliminar la advertencia de deprecación
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   deploy-strategy:
     runs-on: ubuntu-latest
@@ -36,9 +40,10 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          # CORRECCIÓN: Usamos aws_region (guion bajo) para coincidir con el input
           aws-region: ${{ github.event.inputs.aws_region }}
 
-      - name: Configurar Kubectl para EKS (Usando AWS CLI)
+      - name: Configurar Kubectl para EKS
         run: |
           aws eks update-kubeconfig --name ${{ github.event.inputs.eks_cluster_name }} --region ${{ github.event.inputs.aws_region }}
       
@@ -66,7 +71,7 @@ jobs:
           SERVICE_NAME="duoc-app-bg-service"
           YAML_FILE_GREEN="k8s/blue-green-green.yaml"
           
-          echo "1. Desplegando el entorno GREEN (Inactivo)..."
+          echo "1. Desplegando el entorno GREEN..."
           kubectl apply -f $YAML_FILE_GREEN
           kubectl rollout status deployment/$DEPLOYMENT_GREEN_NAME --timeout=300s
           
