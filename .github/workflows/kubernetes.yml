@@ -94,4 +94,14 @@ jobs:
           echo "Monitoreo Canary..."
           sleep 120
           kubectl scale deployment/duoc-app-canary-v2 --replicas=3
-          kubectl scale deployment/duoc-app-stable-v1 --replicas=0
+          kubectl scale deployment/duoc-app-stable-v1 --replicas=0# En la sección de inputs
+      aws_region:
+        description: 'Región de AWS'
+        required: true
+        default: 'us-west-2' # <--- CAMBIA ESTO
+
+# En la sección de env
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  DEF_REGION: 'us-west-2'    # <--- CAMBIA ESTO
+  DEF_CLUSTER: 'duoc-eks-cluster-cli'
