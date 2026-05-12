@@ -22,7 +22,6 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # Valores de respaldo para cuando el disparo es por 'push'
   DEF_REGION: 'us-east-1'
   DEF_CLUSTER: 'duoc-eks-cluster-cli'
 
@@ -42,18 +41,16 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          # Si no hay input (push), usa la región por defecto
           aws-region: ${{ github.event.inputs.aws_region || env.DEF_REGION }}
 
-      - name: Configurar Kubectl para EKS
-        uses: aws-actions/eks-set-context@v4
-        with:
-          cluster-name: ${{ github.event.inputs.eks_cluster_name || env.DEF_CLUSTER }}
-          aws-region: ${{ github.event.inputs.aws_region || env.DEF_REGION }}
-      
-      # -----------------------------------------------------------
-      # 1. ROLLING UPDATE (Default en Push)
-      # -----------------------------------------------------------
+      # REEMPLAZO DE LA ACCIÓN FALLIDA POR AWS CLI
+      - name: Configurar acceso a EKS (kubeconfig)
+        run: |
+          CLUSTER_NAME="${{ github.event.inputs.eks_cluster_name || env.DEF_CLUSTER }}"
+          REGION="${{ github.event.inputs.aws_region || env.DEF_REGION }}"
+          aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$REGION"
+
+      # 1. ROLLING UPDATE
       - name: 🔄 Ejecutar Rolling Update
         if: ${{ github.event.inputs.strategy == 'rolling-update' || github.event_name == 'push' }}
         run: |
@@ -61,9 +58,7 @@ jobs:
           kubectl apply -f k8s/rolling-update.yaml
           kubectl rollout status deployment/duoc-app-rolling --timeout=300s
 
-      # -----------------------------------------------------------
       # 2. RECREATE
-      # -----------------------------------------------------------
       - name: ❌ Ejecutar Recreate
         if: ${{ github.event.inputs.strategy == 'recreate' }}
         run: |
@@ -71,13 +66,10 @@ jobs:
           kubectl apply -f k8s/recreate.yaml
           kubectl rollout status deployment/duoc-app-recreate --timeout=300s
           
-      # -----------------------------------------------------------
       # 3. BLUE/GREEN
-      # -----------------------------------------------------------
       - name: 🟦 Ejecutar Blue/Green
         if: ${{ github.event.inputs.strategy == 'blue-green' }}
         run: |
-          # CORRECCIÓN: Definir variables de shell correctamente
           DEPLOYMENT_GREEN_NAME="duoc-app-green"
           SERVICE_NAME="duoc-app-bg-service"
           YAML_FILE_GREEN="k8s/blue-green-green.yaml"
@@ -87,9 +79,7 @@ jobs:
           sleep 120
           kubectl patch service $SERVICE_NAME -p '{"spec": {"selector": {"version": "green"}}}'
 
-      # -----------------------------------------------------------
       # 4. CANARY
-      # -----------------------------------------------------------
       - name: 🐥 Ejecutar Canary
         if: ${{ github.event.inputs.strategy == 'canary' }}
         run: |
