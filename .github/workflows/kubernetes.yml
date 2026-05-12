@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       strategy:
-        description: 'Estrategia a Ejecutar (rolling-update, recreate, blue-green, o canary)'
+        description: 'Estrategia a Ejecutar'
         required: true
         type: string
         default: 'rolling-update'
@@ -21,8 +21,11 @@ on:
         default: 'us-east-1'
 
 env:
-  # Optamos por Node.js 24 para eliminar la advertencia de deprecación
+  # Solución al error de Node.js 20/24
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # Definimos constantes para evitar que el 'push' falle por falta de inputs
+  DEFAULT_REGION: 'us-east-1'
+  DEFAULT_CLUSTER: 'duoc-eks-cluster-cli'
 
 jobs:
   deploy-strategy:
@@ -40,16 +43,18 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          # CORRECCIÓN: Usamos aws_region (guion bajo) para coincidir con el input
-          aws-region: ${{ github.event.inputs.aws_region }}
+          # Usamos el input si existe, si no, la región por defecto
+          aws-region: ${{ github.event.inputs.aws_region || env.DEFAULT_REGION }}
 
       - name: Configurar Kubectl para EKS
         run: |
-          aws eks update-kubeconfig --name ${{ github.event.inputs.eks_cluster_name }} --region ${{ github.event.inputs.aws_region }}
+          CLUSTER_NAME=${{ github.event.inputs.eks_cluster_name || env.DEFAULT_CLUSTER }}
+          REGION_NAME=${{ github.event.inputs.aws_region || env.DEFAULT_REGION }}
+          aws eks update-kubeconfig --name $CLUSTER_NAME --region $REGION_NAME
       
-      # 1. ROLLING UPDATE
+      # 1. ROLLING UPDATE (Estrategia por defecto en PUSH)
       - name: 🔄 Ejecutar Rolling Update
-        if: ${{ github.event.inputs.strategy == 'rolling-update' }}
+        if: ${{ github.event.inputs.strategy == 'rolling-update' || github.event_name == 'push' }}
         run: |
           echo "Aplicando YAML para Rolling Update..."
           kubectl apply -f k8s/rolling-update.yaml
@@ -70,15 +75,9 @@ jobs:
           DEPLOYMENT_GREEN_NAME="duoc-app-green"
           SERVICE_NAME="duoc-app-bg-service"
           YAML_FILE_GREEN="k8s/blue-green-green.yaml"
-          
-          echo "1. Desplegando el entorno GREEN..."
           kubectl apply -f $YAML_FILE_GREEN
           kubectl rollout status deployment/$DEPLOYMENT_GREEN_NAME --timeout=300s
-          
-          echo "2. Ventana de Prueba (120 segundos)..."
           sleep 120
-          
-          echo "3. Ejecutando Switch: BLUE -> GREEN..."
           kubectl patch service $SERVICE_NAME -p "{\"spec\": {\"selector\": {\"version\": \"green\"}}}"
 
       # 4. CANARY
@@ -89,16 +88,8 @@ jobs:
           STABLE_DEPLOYMENT_NAME="duoc-app-stable-v1"
           YAML_FILE_CANARY="k8s/canary-v2.yaml"
           TOTAL_REPLICAS=3
-          
-          echo "1. Desplegando CANARY (10% de tráfico)..."
           kubectl apply -f $YAML_FILE_CANARY
           kubectl rollout status deployment/$DEPLOYMENT_CANARY_NAME --timeout=300s
-          
-          echo "2. Ventana de Observación (120 segundos)..."
           sleep 120
-          
-          echo "3. PROMOCIÓN: Escalar V2 y apagar V1..."
           kubectl scale deployment/$DEPLOYMENT_CANARY_NAME --replicas=$TOTAL_REPLICAS
           kubectl scale deployment/$STABLE_DEPLOYMENT_NAME --replicas=0
-          
-          kubectl rollout status deployment/$DEPLOYMENT_CANARY_NAME --timeout=300s
