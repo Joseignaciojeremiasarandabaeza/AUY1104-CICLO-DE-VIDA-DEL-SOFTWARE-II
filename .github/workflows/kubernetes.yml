@@ -55,43 +55,43 @@ jobs:
           REGION_NAME="${{ github.event.inputs.aws_region || env.DEF_REGION }}"
           
           echo "Verificando identidad de AWS..."
-          aws sts get-caller-identity || { echo "ERROR: Credenciales inválidas o expiradas"; exit 1; }
+          aws sts get-caller-identity || { echo "ERROR: Credenciales inválidas"; exit 1; }
 
           echo "Actualizando kubeconfig para $CLUSTER_NAME..."
           aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$REGION_NAME"
 
           echo "Probando conexión con el API Server..."
-          kubectl get nodes || { echo "ERROR: No se pudo comunicar con el clúster. Revisa los permisos (RBAC) o el estado del clúster."; exit 1; }
+          kubectl get nodes || { echo "ERROR: No se pudo conectar"; exit 1; }
 
       # --- LÓGICA DE ESTRATEGIAS ---
 
-      - name: 🔄 Estrategia: Rolling Update
+      - name: Estrategia Rolling Update
         if: ${{ github.event.inputs.strategy == 'rolling-update' || github.event_name == 'push' }}
         run: |
           kubectl apply -f k8s/rolling-update.yaml
           kubectl rollout status deployment/duoc-app-rolling --timeout=300s
 
-      - name: ❌ Estrategia: Recreate
+      - name: Estrategia Recreate
         if: ${{ github.event.inputs.strategy == 'recreate' }}
         run: |
           kubectl apply -f k8s/recreate.yaml
           kubectl rollout status deployment/duoc-app-recreate --timeout=300s
 
-      - name: 🟦 Estrategia: Blue/Green
+      - name: Estrategia Blue Green
         if: ${{ github.event.inputs.strategy == 'blue-green' }}
         run: |
           kubectl apply -f k8s/blue-green-green.yaml
           kubectl rollout status deployment/duoc-app-green --timeout=300s
-          echo "Validando entorno Green (120s)..."
+          echo "Validando entorno Green..."
           sleep 120
           kubectl patch service duoc-app-bg-service -p '{"spec": {"selector": {"version": "green"}}}'
 
-      - name: 🐥 Estrategia: Canary
+      - name: Estrategia Canary
         if: ${{ github.event.inputs.strategy == 'canary' }}
         run: |
           kubectl apply -f k8s/canary-v2.yaml
           kubectl rollout status deployment/duoc-app-canary-v2 --timeout=300s
-          echo "Monitoreo de tráfico Canary (120s)..."
+          echo "Monitoreo Canary..."
           sleep 120
           kubectl scale deployment/duoc-app-canary-v2 --replicas=3
           kubectl scale deployment/duoc-app-stable-v1 --replicas=0
