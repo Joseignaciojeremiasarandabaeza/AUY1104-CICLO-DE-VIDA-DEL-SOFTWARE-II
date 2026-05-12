@@ -64,7 +64,6 @@ jobs:
       - name: 🟦 Ejecutar Blue/Green
         if: ${{ github.event.inputs.strategy == 'blue-green' }}
         run: |
-          # Definición de variables en BASH (Sin ${{ }})
           DEPLOYMENT_GREEN_NAME="duoc-app-green"
           SERVICE_NAME="duoc-app-bg-service"
           YAML_FILE_GREEN="k8s/blue-green-green.yaml"
@@ -77,13 +76,12 @@ jobs:
           sleep 120
           
           echo "3. Ejecutando Switch: BLUE -> GREEN..."
-          kubectl patch service $SERVICE_NAME -p '{"spec": {"selector": {"version": "green"}}}'
+          kubectl patch service $SERVICE_NAME -p "{\"spec\": {\"selector\": {\"version\": \"green\"}}}"
 
       # 4. CANARY
       - name: 🐥 Ejecutar Canary
         if: ${{ github.event.inputs.strategy == 'canary' }}
         run: |
-          # Definición de variables en BASH
           DEPLOYMENT_CANARY_NAME="duoc-app-canary-v2"
           STABLE_DEPLOYMENT_NAME="duoc-app-stable-v1"
           YAML_FILE_CANARY="k8s/canary-v2.yaml"
