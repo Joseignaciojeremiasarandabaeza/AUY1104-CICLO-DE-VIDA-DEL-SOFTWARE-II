@@ -9,7 +9,12 @@ on:
       strategy:
         description: 'Estrategia (rolling-update, recreate, blue-green, canary)'
         required: true
-        type: string
+        type: choice
+        options:
+          - rolling-update
+          - recreate
+          - blue-green
+          - canary
         default: 'rolling-update'
       eks_cluster_name:
         description: 'Nombre del Cluster'
@@ -21,13 +26,15 @@ on:
         default: 'us-east-1'
 
 env:
+  # Forzar Node 24 para evitar warnings de deprecación en Runners modernos
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # Fallbacks para eventos de 'push'
+  # Fallbacks para eventos de 'push' (donde no hay inputs manuales)
   DEF_REGION: 'us-east-1'
   DEF_CLUSTER: 'duoc-eks-cluster-cli'
 
 jobs:
   deploy-strategy:
+    name: Despliegue en EKS
     runs-on: ubuntu-latest
     permissions:
       contents: read 
@@ -36,12 +43,12 @@ jobs:
       - name: Checkout Código
         uses: actions/checkout@v4
 
-      # Paso de Debug: Útil para identificar por qué da Exit Code 254
       - name: Debug Context
         run: |
           echo "Evento: ${{ github.event_name }}"
-          echo "Región a usar: ${{ github.event.inputs.aws_region || env.DEF_REGION }}"
-          echo "Cluster a usar: ${{ github.event.inputs.eks_cluster_name || env.DEF_CLUSTER }}"
+          echo "Estrategia: ${{ github.event.inputs.strategy || 'rolling-update (default)' }}"
+          echo "Región: ${{ github.event.inputs.aws_region || env.DEF_REGION }}"
+          echo "Cluster: ${{ github.event.inputs.eks_cluster_name || env.DEF_CLUSTER }}"
 
       - name: Configurar Credenciales AWS
         uses: aws-actions/configure-aws-credentials@v4
@@ -53,44 +60,53 @@ jobs:
 
       - name: Configurar acceso a EKS (kubeconfig)
         run: |
-          # Usamos variables locales para limpiar el comando
           CLUSTER_NAME="${{ github.event.inputs.eks_cluster_name || env.DEF_CLUSTER }}"
           REGION_NAME="${{ github.event.inputs.aws_region || env.DEF_REGION }}"
           
-          # Intentar actualizar kubeconfig
+          echo "Verificando identidad de AWS..."
+          aws sts get-caller-identity || { echo "ERROR: Credenciales inválidas o expiradas"; exit 1; }
+
+          echo "Actualizando kubeconfig para $CLUSTER_NAME..."
           aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$REGION_NAME"
 
-      # 1. ESTRATEGIA: ROLLING UPDATE (Default para Push)
+          echo "Verificando conexión con el API de Kubernetes..."
+          kubectl cluster-info || { echo "ERROR: No se pudo conectar al cluster EKS"; exit 1; }
+
+      # --- ESTRATEGIAS DE DESPLIEGUE ---
+
+      # 1. ROLLING UPDATE: Actualización progresiva (Default para Push en Master)
       - name: 🔄 Ejecutar Rolling Update
         if: ${{ github.event.inputs.strategy == 'rolling-update' || github.event_name == 'push' }}
         run: |
           kubectl apply -f k8s/rolling-update.yaml
           kubectl rollout status deployment/duoc-app-rolling --timeout=300s
 
-      # 2. ESTRATEGIA: RECREATE
+      # 2. RECREATE: Matar todo antes de levantar lo nuevo
       - name: ❌ Ejecutar Recreate
         if: ${{ github.event.inputs.strategy == 'recreate' }}
         run: |
           kubectl apply -f k8s/recreate.yaml
           kubectl rollout status deployment/duoc-app-recreate --timeout=300s
 
-      # 3. ESTRATEGIA: BLUE/GREEN
+      # 3. BLUE/GREEN: Cambio de tráfico mediante Service selector
       - name: 🟦 Ejecutar Blue/Green
         if: ${{ github.event.inputs.strategy == 'blue-green' }}
         run: |
           kubectl apply -f k8s/blue-green-green.yaml
           kubectl rollout status deployment/duoc-app-green --timeout=300s
-          echo "Esperando validación..."
+          echo "Esperando 120s para validación de salud de la versión Green..."
           sleep 120
+          echo "Cambiando tráfico al entorno Green..."
           kubectl patch service duoc-app-bg-service -p '{"spec": {"selector": {"version": "green"}}}'
 
-      # 4. ESTRATEGIA: CANARY
+      # 4. CANARY: Despliegue parcial y escalado final
       - name: 🐥 Ejecutar Canary
         if: ${{ github.event.inputs.strategy == 'canary' }}
         run: |
           kubectl apply -f k8s/canary-v2.yaml
           kubectl rollout status deployment/duoc-app-canary-v2 --timeout=300s
-          echo "Monitoreando tráfico inicial..."
+          echo "Monitoreando Canary (v2) con tráfico parcial durante 120s..."
           sleep 120
+          echo "Canary exitoso. Escalando v2 al 100% y retirando v1..."
           kubectl scale deployment/duoc-app-canary-v2 --replicas=3
           kubectl scale deployment/duoc-app-stable-v1 --replicas=0
