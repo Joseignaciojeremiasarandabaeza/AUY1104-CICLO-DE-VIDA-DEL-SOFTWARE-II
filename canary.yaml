@@ -1,0 +1,81 @@
+### 1. SERVICE - Expone la Aplicación a Través del Load Balancer (ELB/ALB)
+
+# Este Service dirige el tráfico a CUALQUIER Pod que tenga la etiqueta 'app: duoc-app'.
+# Esto incluye tanto la versión Stable como la Canary.
+apiVersion: v1
+kind: Service
+metadata:
+  name: duoc-app-canary-service
+  labels:
+    app: duoc-app
+spec:
+  # 💡 CLAVE: Este selector apunta a ambos Deployments.
+  selector:
+    app: duoc-app 
+  type: LoadBalancer 
+  ports:
+    - protocol: TCP
+      port: 80         
+      targetPort: 3000
+
+---
+### 2. DEPLOYMENT - Versión Estable (BLUE)
+
+# Esta es la versión principal, recibiendo la mayoría del tráfico (90%).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: duoc-app-stable-v1
+  labels:
+    app: duoc-app
+spec:
+  # 💡 CLAVE: 9 réplicas para el 90% del tráfico (9 de 10 Pods totales)
+  replicas: 2
+  selector:
+    matchLabels:
+      app: duoc-app
+      version: stable
+  template:
+    metadata:
+      labels:
+        app: duoc-app
+        version: stable # Etiqueta de versión
+    spec:
+      containers:
+      - name: node-app-container
+        # ⚠️ REEMPLAZA: Usa tu imagen de producción V1.0 aquí
+        image: $ECR_URI_V1
+        ports:
+        - containerPort: 3000
+        imagePullPolicy: Always
+
+---
+### 3. DEPLOYMENT - Versión Canary (GREEN)
+
+# Esta es la nueva versión, recibiendo una pequeña porción del tráfico (10%) para pruebas.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: duoc-app-canary-v2
+  labels:
+    app: duoc-app
+spec:
+  # 💡 CLAVE: 1 réplica para el 10% del tráfico (1 de 10 Pods totales)
+  replicas: 1
+  selector:
+    matchLabels:
+      app: duoc-app
+      version: canary
+  template:
+    metadata:
+      labels:
+        app: duoc-app
+        version: canary # Etiqueta de versión
+    spec:
+      containers:
+      - name: node-app-container
+        # ⚠️ REEMPLAZA: Usa la nueva imagen V2.0 (Canary) aquí
+        image: $ECR_URI_V2
+        ports:
+        - containerPort: 3000
+        imagePullPolicy: Always
