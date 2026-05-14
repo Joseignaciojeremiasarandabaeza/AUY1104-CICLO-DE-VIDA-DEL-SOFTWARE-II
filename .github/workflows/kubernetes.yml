@@ -16,28 +16,20 @@ on:
           - blue-green
           - canary
         default: 'rolling-update'
-      eks_cluster_name:
-        description: 'Nombre del Cluster EKS'
-        required: true
-        default: 'duoc-eks-cluster-cli'
-      aws_region:
-        description: 'Región de AWS'
-        required: true
-        default: 'us-east-1'
 
 env:
+  # Configuración del Clúster basada en tu captura
+  EKS_CLUSTER_NAME: 'duoc-eks-cluster-cli'
+  AWS_REGION: 'us-east-1'
+  # Rutas de tus archivos YAML
   YAML_ROLLING: 'k8s/rolling-update.yaml'
   YAML_RECREATE: 'k8s/recreate.yaml'
   YAML_GREEN: 'k8s/blue-green-green.yaml'
   YAML_CANARY: 'k8s/canary-v2.yaml'
-  STRATEGY_DEFAULT: 'rolling-update'
 
 jobs:
   deploy-strategy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read 
-
     steps:
       - name: Checkout Código
         uses: actions/checkout@v4
@@ -48,50 +40,45 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: ${{ github.event.inputs.aws_region || 'us-east-1' }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      # REEMPLAZO DE LA ACCIÓN QUE FALLABA
-      - name: Configurar acceso a EKS (kubeconfig)
+      - name: Configurar acceso a EKS
         run: |
-          aws eks update-kubeconfig --name ${{ github.event.inputs.eks_cluster_name || 'duoc-eks-cluster-cli' }} --region ${{ github.event.inputs.aws_region || 'us-east-1' }}
+          aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+          echo "Verificando conexión..."
+          kubectl get nodes
 
-      # 🔄 ROLLING UPDATE
+      # 🔄 ESTRATEGIA: ROLLING UPDATE
       - name: 🔄 Ejecutar Rolling Update
-        if: |
-          github.event.inputs.strategy == 'rolling-update' || 
-          (github.event_name == 'push' && env.STRATEGY_DEFAULT == 'rolling-update')
+        if: ${{ github.event.inputs.strategy == 'rolling-update' || github.event_name == 'push' }}
         run: |
           kubectl apply -f ${{ env.YAML_ROLLING }}
           kubectl rollout status deployment/duoc-app-rolling --timeout=300s
 
-      # ❌ RECREATE
+      # ❌ ESTRATEGIA: RECREATE
       - name: ❌ Ejecutar Recreate
         if: ${{ github.event.inputs.strategy == 'recreate' }}
         run: |
           kubectl apply -f ${{ env.YAML_RECREATE }}
           kubectl rollout status deployment/duoc-app-recreate --timeout=300s
 
-      # 🟦 BLUE/GREEN
+      # 🟦 ESTRATEGIA: BLUE/GREEN
       - name: 🟦 Ejecutar Blue/Green
         if: ${{ github.event.inputs.strategy == 'blue-green' }}
         run: |
-          DEPLOYMENT_GREEN="duoc-app-green"
-          SERVICE_NAME="duoc-app-bg-service"
           kubectl apply -f ${{ env.YAML_GREEN }}
-          kubectl rollout status deployment/$DEPLOYMENT_GREEN --timeout=300s
-          echo "Esperando 120s para validación..."
-          sleep 120
-          kubectl patch service $SERVICE_NAME -p '{"spec": {"selector": {"version": "green"}}}'
+          kubectl rollout status deployment/duoc-app-green --timeout=300s
+          echo "Esperando validación de entorno Green..."
+          sleep 30
+          kubectl patch service duoc-app-bg-service -p '{"spec": {"selector": {"version": "green"}}}'
 
-      # 🐥 CANARY
+      # 🐥 ESTRATEGIA: CANARY
       - name: 🐥 Ejecutar Canary
         if: ${{ github.event.inputs.strategy == 'canary' }}
         run: |
-          CANARY_NAME="duoc-app-canary-v2"
-          STABLE_NAME="duoc-app-stable-v1"
           kubectl apply -f ${{ env.YAML_CANARY }}
-          kubectl rollout status deployment/$CANARY_NAME --timeout=300s
-          echo "Esperando 120s para validación..."
-          sleep 120
-          kubectl scale deployment/$CANARY_NAME --replicas=3
-          kubectl scale deployment/$STABLE_NAME --replicas=0
+          kubectl rollout status deployment/duoc-app-canary-v2 --timeout=300s
+          echo "Canary desplegado al 10%. Validando..."
+          sleep 30
+          kubectl scale deployment/duoc-app-canary-v2 --replicas=3
+          kubectl scale deployment/duoc-app-stable-v1 --replicas=0
