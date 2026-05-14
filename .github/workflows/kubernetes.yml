@@ -7,91 +7,113 @@ on:
   workflow_dispatch:
     inputs:
       strategy:
-        description: 'Estrategia (rolling-update, recreate, blue-green, canary)'
+        description: 'Estrategia a Ejecutar (Debe ser: rolling-update, recreate, blue-green, o canary)'
         required: true
-        type: choice
-        options:
-          - rolling-update
-          - recreate
-          - blue-green
-          - canary
-        default: 'rolling-update'
+        type: string
+        default: 'rolling-update' # Opciones [rolling-update, recreate, canary, blue-green]
       eks_cluster_name:
-        description: 'Nombre del Cluster'
+        description: 'Nombre del Cluster EKS (duoc-eks-cluster-cli)'
         required: true
         default: 'duoc-eks-cluster-cli'
       aws_region:
         description: 'Región de AWS'
         required: true
-        default: 'us-west-2'
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  DEF_REGION: 'us-west-2'
-  DEF_CLUSTER: 'duoc-eks-cluster-cli'
+        default: 'us-east-1'
 
 jobs:
   deploy-strategy:
-    name: Despliegue en EKS
     runs-on: ubuntu-latest
     permissions:
       contents: read 
-
+    
     steps:
       - name: Checkout Código
         uses: actions/checkout@v4
 
-      - name: Configurar Credenciales AWS
+      - name: Configurar Credenciales AWS (AK/SK/Token)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: ${{ github.event.inputs.aws_region || env.DEF_REGION }}
+          aws-region: ${{ github.event.inputs.aws_region }}
 
-      - name: Configurar acceso a EKS (kubeconfig)
+      - name: Configurar Kubectl para EKS
+        uses: aws-actions/eks-set-context@v4
+        with:
+          cluster-name: ${{ github.event.inputs.eks_cluster_name }}
+          aws-region: ${{ github.event.inputs.aws_region }}
+      
+      # -----------------------------------------------------------
+      # 2.1. 🔄 ROLLING UPDATE (Comportamiento por defecto de K8s)
+      # -----------------------------------------------------------
+      - name: 🔄 Ejecutar Rolling Update (Default)
+        # La condición se mantiene. Ahora compara el string que el usuario ingresó.
+        if: ${{ github.event.inputs.strategy == 'rolling-update' }}
         run: |
-          CLUSTER_NAME="${{ github.event.inputs.eks_cluster_name || env.DEF_CLUSTER }}"
-          REGION_NAME="${{ github.event.inputs.aws_region || env.DEF_REGION }}"
-          
-          echo "Verificando identidad de AWS..."
-          aws sts get-caller-identity || { echo "ERROR: Credenciales inválidas"; exit 1; }
-
-          echo "Actualizando kubeconfig para $CLUSTER_NAME..."
-          aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$REGION_NAME"
-
-          echo "Probando conexión con el API Server..."
-          kubectl get nodes || { echo "ERROR: No se pudo conectar"; exit 1; }
-
-      # --- LÓGICA DE ESTRATEGIAS ---
-
-      - name: Estrategia Rolling Update
-        if: ${{ github.event.inputs.strategy == 'rolling-update' || github.event_name == 'push' }}
-        run: |
-          kubectl apply -f k8s/rolling-update.yaml
+          echo "Aplicando YAML para Rolling Update (Actualización gradual)..."
+          kubectl apply -f [K8S-YAML-PATH]
           kubectl rollout status deployment/duoc-app-rolling --timeout=300s
+          echo "✅ Rolling Update completado."
 
-      - name: Estrategia Recreate
+      # -----------------------------------------------------------
+      # 2.2. ❌ RECREATE (All-in-once)
+      # -----------------------------------------------------------
+      - name: ❌ Ejecutar Recreate (All-in-once)
         if: ${{ github.event.inputs.strategy == 'recreate' }}
         run: |
-          kubectl apply -f k8s/recreate.yaml
+          echo "Aplicando YAML para Recreate (All-in-once)..."
+          kubectl apply -f [K8S-YAML-PATH]
           kubectl rollout status deployment/duoc-app-recreate --timeout=300s
-
-      - name: Estrategia Blue Green
+          echo "✅ Recreate completado."
+          
+      # -----------------------------------------------------------
+      # 2.3. 🟦 BLUE/GREEN (Switch atómico con Patch)
+      # -----------------------------------------------------------
+      - name: 🟦 Ejecutar Blue/Green (kubectl patch)
         if: ${{ github.event.inputs.strategy == 'blue-green' }}
         run: |
-          kubectl apply -f k8s/blue-green-green.yaml
-          kubectl rollout status deployment/duoc-app-green --timeout=300s
-          echo "Validando entorno Green..."
+          DEPLOYMENT_GREEN_NAME="duoc-app-green"
+          SERVICE_NAME="duoc-app-bg-service"
+          YAML_FILE_GREEN="[K8S-YAML-PATH]"
+          
+          echo "1. Desplegando el entorno GREEN (Inactivo)..."
+          kubectl apply -f ${{ YAML_FILE_GREEN }}
+          kubectl rollout status deployment/${{ DEPLOYMENT_GREEN_NAME }} --timeout=300s
+          echo "✅ Rollout de GREEN completado."
+          
+          echo "2. Ventana de Prueba/Observación (120 segundos)..."
           sleep 120
-          kubectl patch service duoc-app-bg-service -p '{"spec": {"selector": {"version": "green"}}}'
-
-      - name: Estrategia Canary
+          echo "✅ Prueba simulada completada."
+          
+          echo "3. Ejecutando el Switch de tráfico: BLUE -> GREEN..."
+          kubectl patch service ${{ SERVICE_NAME }} -p '{"spec": {"selector": {"version": "green"}}}'
+          echo "✅ Switch de tráfico completado."
+          
+      # -----------------------------------------------------------
+      # 2.4. 🐥 CANARY (Promoción con Scale)
+      # -----------------------------------------------------------
+      - name: 🐥 Ejecutar Canary (kubectl scale)
         if: ${{ github.event.inputs.strategy == 'canary' }}
         run: |
-          kubectl apply -f k8s/canary-v2.yaml
-          kubectl rollout status deployment/duoc-app-canary-v2 --timeout=300s
-          echo "Monitoreo Canary..."
+          DEPLOYMENT_CANARY_NAME="duoc-app-canary-v2"
+          STABLE_DEPLOYMENT_NAME="duoc-app-stable-v1"
+          YAML_FILE_CANARY="[K8S-YAML-PATH]"
+          TOTAL_REPLICAS=3 # Asegúrate que este sea el número total de réplicas
+          
+          echo "1. Desplegando el entorno CANARY (10% de tráfico)..."
+          kubectl apply -f ${{ YAML_FILE_CANARY }}
+          kubectl rollout status deployment/${{ DEPLOYMENT_CANARY_NAME }} --timeout=300s
+          echo "✅ Rollout de CANARY inicial completado."
+          
+          echo "2. Ventana de Prueba/Observación (120 segundos)..."
           sleep 120
-          kubectl scale deployment/duoc-app-canary-v2 --replicas=3
-          kubectl scale deployment/duoc-app-stable-v1 --replicas=0
+          echo "✅ Prueba simulada completada."
+          
+          echo "3. PROMOCIÓN: Escalar V2 a $TOTAL_REPLICAS y V1 a 0..."
+          kubectl scale deployment/${{ DEPLOYMENT_CANARY_NAME }} --replicas=${{ TOTAL_REPLICAS }}
+          kubectl scale deployment/${{ STABLE_DEPLOYMENT_NAME }} --replicas=0
+          
+          echo "4. Esperando el Rollout de Promoción (V2)..."
+          kubectl rollout status deployment/${{ DEPLOYMENT_CANARY_NAME }} --timeout=300s
+          echo "✅ Promoción Canary completada."
