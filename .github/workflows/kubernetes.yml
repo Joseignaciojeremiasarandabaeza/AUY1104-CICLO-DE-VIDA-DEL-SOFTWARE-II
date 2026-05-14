@@ -30,7 +30,6 @@ env:
   YAML_RECREATE: 'k8s/recreate.yaml'
   YAML_GREEN: 'k8s/blue-green-green.yaml'
   YAML_CANARY: 'k8s/canary-v2.yaml'
-  # Default si es un push
   STRATEGY_DEFAULT: 'rolling-update'
 
 jobs:
@@ -51,11 +50,10 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ github.event.inputs.aws_region || 'us-east-1' }}
 
-      - name: Configurar Kubectl para EKS
-        uses: aws-actions/eks-set-context@v4
-        with:
-          cluster-name: ${{ github.event.inputs.eks_cluster_name || 'duoc-eks-cluster-cli' }}
-          aws-region: ${{ github.event.inputs.aws_region || 'us-east-1' }}
+      # REEMPLAZO DE LA ACCIÓN QUE FALLABA
+      - name: Configurar acceso a EKS (kubeconfig)
+        run: |
+          aws eks update-kubeconfig --name ${{ github.event.inputs.eks_cluster_name || 'duoc-eks-cluster-cli' }} --region ${{ github.event.inputs.aws_region || 'us-east-1' }}
 
       # 🔄 ROLLING UPDATE
       - name: 🔄 Ejecutar Rolling Update
