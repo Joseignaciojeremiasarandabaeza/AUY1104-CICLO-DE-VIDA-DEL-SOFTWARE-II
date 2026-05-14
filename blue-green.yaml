@@ -1,3 +1,4 @@
+# 1. DEPLOYMENT BLUE (v1.0)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -9,7 +10,7 @@ spec:
   selector:
     matchLabels:
       app: duoc-app
-      version: blue # <-- Única Etiqueta: 'blue'
+      version: blue
   template:
     metadata:
       labels:
@@ -18,29 +19,31 @@ spec:
     spec:
       containers:
       - name: node-app-container
-        # ⚠️ IMAGEN ACTUAL: Versión 1.0 (Blue)
-        image: $ECR_URI_V1
+        # Cambiado de $ECR_URI_V1 a imagen real
+        image: nginx:1.25
         ports:
         - containerPort: 3000
         imagePullPolicy: Always
 
 ---
-# 2. SERVICE (LoadBalancer) - Expone la aplicación al mundo, apuntando a BLUE
+# 2. SERVICE (LoadBalancer)
 apiVersion: v1
 kind: Service
 metadata:
   name: duoc-app-bg-service
 spec:
-  # 💡 CLAVE: Inicialmente, apunta SÓLO a los Pods etiquetados como 'blue'
   selector:
+    # Este es el selector que el pipeline cambiará de 'blue' a 'green'
+    app: duoc-app
     version: blue 
   type: LoadBalancer 
   ports:
     - protocol: TCP
-      port: 80         
+      port: 80          
       targetPort: 3000
+
 ---
-# 3. DEPLOYMENT GREEN (v2.0) - El nuevo entorno (inactivo para el usuario)
+# 3. DEPLOYMENT GREEN (v2.0)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -52,7 +55,7 @@ spec:
   selector:
     matchLabels:
       app: duoc-app
-      version: green # <-- Única Etiqueta: 'green'
+      version: green
   template:
     metadata:
       labels:
@@ -61,8 +64,8 @@ spec:
     spec:
       containers:
       - name: node-app-container
-        # ⚠️ IMAGEN NUEVA: Versión 2.0 (Green)
-        image: $ECR_URI_V2
+        # Cambiado de $ECR_URI_V2 a imagen real (un tag distinto para notar el cambio)
+        image: nginx:latest
         ports:
         - containerPort: 3000
         imagePullPolicy: Always
