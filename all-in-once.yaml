@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: duoc-app-deployment
+  labels:
+    app: duoc-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: duoc-app
+  template:
+    metadata:
+      labels:
+        app: duoc-app
+    spec:
+      containers:
+      - name: node-app-container
+        image: $ECR_URI_V1
+        ports:
+        - containerPort: 3000
+        imagePullPolicy: Always
+  strategy: 
+    type: Recreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: duoc-app-service
+  labels:
+    app: duoc-app
+spec:
+  selector:
+    app: duoc-app
+  type: LoadBalancer 
+  ports:
+    - protocol: TCP
+      port: 80         
+      targetPort: 3000
