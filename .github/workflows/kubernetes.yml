@@ -28,9 +28,6 @@ on:
 jobs:
   deploy-strategy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read 
-
     steps:
       - name: Checkout Código
         uses: actions/checkout@v4
@@ -48,42 +45,25 @@ jobs:
           aws eks update-kubeconfig --name ${{ github.event.inputs.eks_cluster_name || 'duoc-eks-cluster-cli' }} --region ${{ github.event.inputs.aws_region || 'us-east-1' }}
 
       # -----------------------------------------------------------
-      # 2.1. 🔄 ROLLING UPDATE
-      # -----------------------------------------------------------
-      # -----------------------------------------------------------
-      # 1. Preparar URI (Corregir mayúsculas y persistencia)
-      # -----------------------------------------------------------
-      - name: 🛠️ Preparar URI de ECR
-        run: |
-          # Forzamos minúsculas para evitar el error InvalidImageName
-          RAW_URI="${{ secrets.ECR_REPOSITORY_URI }}"
-          CLEAN_URI=$(echo "$RAW_URI" | tr '[:upper:]' '[:lower:]')
-          echo "ECR_URI_V1=$CLEAN_URI" >> $GITHUB_ENV
-          echo "Desplegando con: $CLEAN_URI"
-
-      # -----------------------------------------------------------
-      # 2.1. 🔄 ROLLING UPDATE (Ahora con IF)
+      # 1. 🔄 ROLLING UPDATE
       # -----------------------------------------------------------
       - name: 🔄 Ejecutar Rolling Update
         if: ${{ github.event.inputs.strategy == 'rolling-update' || github.event_name == 'push' }}
         run: |
-          # ECR_URI_V1 ya está disponible como variable de entorno
-          envsubst < rolling-update.yaml | kubectl apply -f -
-          
+          kubectl apply -f rolling-update.yaml
           kubectl rollout status deployment/duoc-app-rolling --timeout=300s || (kubectl get pods && kubectl describe pods && exit 1)
 
       # -----------------------------------------------------------
-      # 2.2. ❌ RECREATE
+      # 2. ❌ RECREATE
       # -----------------------------------------------------------
       - name: ❌ Ejecutar Recreate
         if: ${{ github.event.inputs.strategy == 'recreate' }}
         run: |
-          echo "Aplicando Recreate con imagen: $ECR_URI_V1"
-          envsubst < all-in-once.yaml | kubectl apply -f -
+          kubectl apply -f all-in-once.yaml
           kubectl rollout status deployment/duoc-app-recreate --timeout=300s
 
       # -----------------------------------------------------------
-      # 2.3. 🟦 BLUE/GREEN
+      # 3. 🟦 BLUE/GREEN
       # -----------------------------------------------------------
       - name: 🟦 Ejecutar Blue/Green
         if: ${{ github.event.inputs.strategy == 'blue-green' }}
@@ -91,33 +71,27 @@ jobs:
           DEPLOYMENT_GREEN_NAME="duoc-app-green"
           SERVICE_NAME="duoc-app-bg-service"
           
-          echo "1. Desplegando el entorno GREEN..."
-          envsubst < blue-green.yaml | kubectl apply -f -
+          kubectl apply -f blue-green.yaml
           kubectl rollout status deployment/$DEPLOYMENT_GREEN_NAME --timeout=300s
           
-          echo "2. Ventana de observación (30 seg)..."
+          echo "Ventana de observación (30 seg)..."
           sleep 30
           
-          echo "3. Switch de tráfico: BLUE -> GREEN..."
           kubectl patch service $SERVICE_NAME -p '{"spec": {"selector": {"version": "green"}}}'
 
       # -----------------------------------------------------------
-      # 2.4. 🐥 CANARY
+      # 4. 🐥 CANARY
       # -----------------------------------------------------------
       - name: 🐥 Ejecutar Canary
         if: ${{ github.event.inputs.strategy == 'canary' }}
         run: |
           DEPLOYMENT_CANARY_NAME="duoc-app-canary-v2"
           STABLE_DEPLOYMENT_NAME="duoc-app-stable-v1"
-          TOTAL_REPLICAS=3
           
-          echo "1. Desplegando el entorno CANARY..."
-          envsubst < canary.yaml | kubectl apply -f -
+          kubectl apply -f canary.yaml
           kubectl rollout status deployment/$DEPLOYMENT_CANARY_NAME --timeout=300s
           
-          echo "2. Ventana de observación (30 seg)..."
           sleep 30
           
-          echo "3. PROMOCIÓN: Escalar V2 y apagar V1..."
-          kubectl scale deployment/$DEPLOYMENT_CANARY_NAME --replicas=$TOTAL_REPLICAS
+          kubectl scale deployment/$DEPLOYMENT_CANARY_NAME --replicas=3
           kubectl scale deployment/$STABLE_DEPLOYMENT_NAME --replicas=0
