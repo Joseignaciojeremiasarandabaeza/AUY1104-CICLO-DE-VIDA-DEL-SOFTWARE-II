@@ -50,28 +50,22 @@ jobs:
       # -----------------------------------------------------------
       # 2.1. 🔄 ROLLING UPDATE
       # -----------------------------------------------------------
-       - name: 🔄 Ejecutar Rolling Update
+      - name: 🔄 Ejecutar Rolling Update
         if: ${{ github.event.inputs.strategy == 'rolling-update' || github.event_name == 'push' }}
         run: |
-          # 1. Definir la URI de tu ECR (Cámbiala por tu URI real)
-          # Ejemplo: 637423277146.dkr.ecr.us-east-1.amazonaws.com/tu-repo:latest
           export ECR_URI_V1="${{ secrets.ECR_REPOSITORY_URI }}"
-          
-          echo "Inyectando la imagen: $ECR_URI_V1"
-          
-          # 2. Usar envsubst para reemplazar $ECR_URI_V1 en el YAML y aplicarlo
           envsubst < rolling-update.yaml | kubectl apply -f -
-          
-          # 3. Monitorear el estado (Ahora con el nombre correcto: duoc-app-rolling)
           kubectl rollout status deployment/duoc-app-rolling --timeout=300s
+
       # -----------------------------------------------------------
       # 2.2. ❌ RECREATE
       # -----------------------------------------------------------
       - name: ❌ Ejecutar Recreate
         if: ${{ github.event.inputs.strategy == 'recreate' }}
         run: |
-          echo "Aplicando Recreate..."
-          kubectl apply -f all-in-once.yaml
+          export ECR_URI_V1="${{ secrets.ECR_REPOSITORY_URI }}"
+          echo "Aplicando Recreate con imagen: $ECR_URI_V1"
+          envsubst < all-in-once.yaml | kubectl apply -f -
           kubectl rollout status deployment/duoc-app-recreate --timeout=300s
 
       # -----------------------------------------------------------
@@ -80,11 +74,12 @@ jobs:
       - name: 🟦 Ejecutar Blue/Green
         if: ${{ github.event.inputs.strategy == 'blue-green' }}
         run: |
+          export ECR_URI_V1="${{ secrets.ECR_REPOSITORY_URI }}"
           DEPLOYMENT_GREEN_NAME="duoc-app-green"
           SERVICE_NAME="duoc-app-bg-service"
           
           echo "1. Desplegando el entorno GREEN..."
-          kubectl apply -f blue-green.yaml
+          envsubst < blue-green.yaml | kubectl apply -f -
           kubectl rollout status deployment/$DEPLOYMENT_GREEN_NAME --timeout=300s
           
           echo "2. Ventana de observación (30 seg)..."
@@ -99,12 +94,13 @@ jobs:
       - name: 🐥 Ejecutar Canary
         if: ${{ github.event.inputs.strategy == 'canary' }}
         run: |
+          export ECR_URI_V1="${{ secrets.ECR_REPOSITORY_URI }}"
           DEPLOYMENT_CANARY_NAME="duoc-app-canary-v2"
           STABLE_DEPLOYMENT_NAME="duoc-app-stable-v1"
           TOTAL_REPLICAS=3
           
           echo "1. Desplegando el entorno CANARY..."
-          kubectl apply -f canary.yaml
+          envsubst < canary.yaml | kubectl apply -f -
           kubectl rollout status deployment/$DEPLOYMENT_CANARY_NAME --timeout=300s
           
           echo "2. Ventana de observación (30 seg)..."
