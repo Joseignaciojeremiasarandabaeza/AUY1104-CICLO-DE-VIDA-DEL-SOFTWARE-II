@@ -56,7 +56,12 @@ jobs:
           echo "Aplicando Rolling Update..."
           kubectl apply -f rolling-update.yaml
           kubectl rollout status deployment/duoc-app-rolling --timeout=300s
-
+      - name: 🔍 Debug - Ver por qué falló el despliegue
+        if: failure() # Solo se ejecuta si el paso anterior falla
+        run: |
+          kubectl get pods
+          kubectl describe deployment duoc-app-rolling
+          kubectl get events --sort-by=.metadata.creationTimestamp
       # -----------------------------------------------------------
       # 2.2. ❌ RECREATE
       # -----------------------------------------------------------
