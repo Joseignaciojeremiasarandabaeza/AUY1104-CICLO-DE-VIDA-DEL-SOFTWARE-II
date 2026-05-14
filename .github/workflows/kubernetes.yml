@@ -23,7 +23,7 @@ on:
       aws_region:
         description: 'Región de AWS'
         required: true
-        default: 'us-west-2'
+        default: 'us-east-1'
 
 env:
   YAML_ROLLING: 'k8s/rolling-update.yaml'
