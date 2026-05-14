@@ -50,18 +50,20 @@ jobs:
       # -----------------------------------------------------------
       # 2.1. 🔄 ROLLING UPDATE
       # -----------------------------------------------------------
-      - name: 🔄 Ejecutar Rolling Update
+       - name: 🔄 Ejecutar Rolling Update
         if: ${{ github.event.inputs.strategy == 'rolling-update' || github.event_name == 'push' }}
         run: |
-          echo "Aplicando Rolling Update..."
-          kubectl apply -f rolling-update.yaml
+          # 1. Definir la URI de tu ECR (Cámbiala por tu URI real)
+          # Ejemplo: 637423277146.dkr.ecr.us-east-1.amazonaws.com/tu-repo:latest
+          export ECR_URI_V1="${{ secrets.ECR_REPOSITORY_URI }}"
+          
+          echo "Inyectando la imagen: $ECR_URI_V1"
+          
+          # 2. Usar envsubst para reemplazar $ECR_URI_V1 en el YAML y aplicarlo
+          envsubst < rolling-update.yaml | kubectl apply -f -
+          
+          # 3. Monitorear el estado (Ahora con el nombre correcto: duoc-app-rolling)
           kubectl rollout status deployment/duoc-app-rolling --timeout=300s
-      - name: 🔍 Debug - Ver por qué falló el despliegue
-        if: failure() # Solo se ejecuta si el paso anterior falla
-        run: |
-          kubectl get pods
-          kubectl describe deployment duoc-app-rolling
-          kubectl get events --sort-by=.metadata.creationTimestamp
       # -----------------------------------------------------------
       # 2.2. ❌ RECREATE
       # -----------------------------------------------------------
