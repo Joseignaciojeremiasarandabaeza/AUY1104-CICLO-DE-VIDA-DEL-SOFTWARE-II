@@ -51,11 +51,12 @@ jobs:
       # 2.1. 🔄 ROLLING UPDATE
       # -----------------------------------------------------------
       - name: 🔄 Ejecutar Rolling Update
-        if: ${{ github.event.inputs.strategy == 'rolling-update' || github.event_name == 'push' }}
         run: |
           export ECR_URI_V1="${{ secrets.ECR_REPOSITORY_URI }}"
           envsubst < rolling-update.yaml | kubectl apply -f -
-          kubectl rollout status deployment/duoc-app-rolling --timeout=300s
+          
+          # Intentar esperar el rollout, pero si falla, mostrar el estado de los Pods
+          kubectl rollout status deployment/duoc-app-rolling --timeout=300s || (kubectl get pods && kubectl describe pods && exit 1)
 
       # -----------------------------------------------------------
       # 2.2. ❌ RECREATE
