@@ -1,11 +1,9 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: duoc-app-deployment
-  labels:
-    app: duoc-app
+  name: duoc-app-rolling  # <--- Este es el nombre que buscará el pipeline
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
       app: duoc-app
@@ -16,7 +14,7 @@ spec:
     spec:
       containers:
       - name: node-app-container
-        image: $ECR_URI_V1
+        image: ${{ env.ECR_URI_V1 }} # Asegúrate que esta variable se resuelva o cámbiala por tu imagen real
         ports:
         - containerPort: 3000
         imagePullPolicy: Always
@@ -27,8 +25,6 @@ apiVersion: v1
 kind: Service
 metadata:
   name: duoc-app-service
-  labels:
-    app: duoc-app
 spec:
   selector:
     app: duoc-app
