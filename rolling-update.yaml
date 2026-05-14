@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: duoc-app-rolling  # <--- Este es el nombre que buscará el pipeline
+  name: duoc-app-rolling
 spec:
   replicas: 3
   selector:
@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: node-app-container
-        image: $ECR_URI_V1  # Usa este formato exacto # Asegúrate que esta variable se resuelva o cámbiala por tu imagen real
+        image: nginx:latest  # Se eliminó la variable $ECR_URI_V1
         ports:
         - containerPort: 3000
         imagePullPolicy: Always
@@ -31,5 +31,5 @@ spec:
   type: LoadBalancer 
   ports:
     - protocol: TCP
-      port: 80         
+      port: 80          
       targetPort: 3000
