@@ -50,12 +50,26 @@ jobs:
       # -----------------------------------------------------------
       # 2.1. 🔄 ROLLING UPDATE
       # -----------------------------------------------------------
-      - name: 🔄 Ejecutar Rolling Update
+      # -----------------------------------------------------------
+      # 1. Preparar URI (Corregir mayúsculas y persistencia)
+      # -----------------------------------------------------------
+      - name: 🛠️ Preparar URI de ECR
         run: |
-          export ECR_URI_V1="${{ secrets.ECR_REPOSITORY_URI }}"
+          # Forzamos minúsculas para evitar el error InvalidImageName
+          RAW_URI="${{ secrets.ECR_REPOSITORY_URI }}"
+          CLEAN_URI=$(echo "$RAW_URI" | tr '[:upper:]' '[:lower:]')
+          echo "ECR_URI_V1=$CLEAN_URI" >> $GITHUB_ENV
+          echo "Desplegando con: $CLEAN_URI"
+
+      # -----------------------------------------------------------
+      # 2.1. 🔄 ROLLING UPDATE (Ahora con IF)
+      # -----------------------------------------------------------
+      - name: 🔄 Ejecutar Rolling Update
+        if: ${{ github.event.inputs.strategy == 'rolling-update' || github.event_name == 'push' }}
+        run: |
+          # ECR_URI_V1 ya está disponible como variable de entorno
           envsubst < rolling-update.yaml | kubectl apply -f -
           
-          # Intentar esperar el rollout, pero si falla, mostrar el estado de los Pods
           kubectl rollout status deployment/duoc-app-rolling --timeout=300s || (kubectl get pods && kubectl describe pods && exit 1)
 
       # -----------------------------------------------------------
@@ -64,7 +78,6 @@ jobs:
       - name: ❌ Ejecutar Recreate
         if: ${{ github.event.inputs.strategy == 'recreate' }}
         run: |
-          export ECR_URI_V1="${{ secrets.ECR_REPOSITORY_URI }}"
           echo "Aplicando Recreate con imagen: $ECR_URI_V1"
           envsubst < all-in-once.yaml | kubectl apply -f -
           kubectl rollout status deployment/duoc-app-recreate --timeout=300s
@@ -75,7 +88,6 @@ jobs:
       - name: 🟦 Ejecutar Blue/Green
         if: ${{ github.event.inputs.strategy == 'blue-green' }}
         run: |
-          export ECR_URI_V1="${{ secrets.ECR_REPOSITORY_URI }}"
           DEPLOYMENT_GREEN_NAME="duoc-app-green"
           SERVICE_NAME="duoc-app-bg-service"
           
@@ -95,7 +107,6 @@ jobs:
       - name: 🐥 Ejecutar Canary
         if: ${{ github.event.inputs.strategy == 'canary' }}
         run: |
-          export ECR_URI_V1="${{ secrets.ECR_REPOSITORY_URI }}"
           DEPLOYMENT_CANARY_NAME="duoc-app-canary-v2"
           STABLE_DEPLOYMENT_NAME="duoc-app-stable-v1"
           TOTAL_REPLICAS=3
