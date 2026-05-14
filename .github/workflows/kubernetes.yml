@@ -16,20 +16,21 @@ on:
           - blue-green
           - canary
         default: 'rolling-update'
-
-env:
-  # Configuración del Clúster basada en tu captura
-  EKS_CLUSTER_NAME: 'duoc-eks-cluster-cli'
-  AWS_REGION: 'us-east-1'
-  # Rutas de tus archivos YAML
-  YAML_ROLLING: 'k8s/rolling-update.yaml'
-  YAML_RECREATE: 'k8s/recreate.yaml'
-  YAML_GREEN: 'k8s/blue-green-green.yaml'
-  YAML_CANARY: 'k8s/canary-v2.yaml'
+      eks_cluster_name:
+        description: 'Nombre del Cluster EKS'
+        required: true
+        default: 'duoc-eks-cluster-cli'
+      aws_region:
+        description: 'Región de AWS'
+        required: true
+        default: 'us-east-1'
 
 jobs:
   deploy-strategy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read 
+
     steps:
       - name: Checkout Código
         uses: actions/checkout@v4
@@ -40,45 +41,68 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ github.event.inputs.aws_region || 'us-east-1' }}
 
-      - name: Configurar acceso a EKS
+      - name: Configurar acceso a EKS (kubeconfig)
         run: |
-          aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
-          echo "Verificando conexión..."
-          kubectl get nodes
+          aws eks update-kubeconfig --name ${{ github.event.inputs.eks_cluster_name || 'duoc-eks-cluster-cli' }} --region ${{ github.event.inputs.aws_region || 'us-east-1' }}
 
-      # 🔄 ESTRATEGIA: ROLLING UPDATE
+      # -----------------------------------------------------------
+      # 2.1. 🔄 ROLLING UPDATE
+      # -----------------------------------------------------------
       - name: 🔄 Ejecutar Rolling Update
         if: ${{ github.event.inputs.strategy == 'rolling-update' || github.event_name == 'push' }}
         run: |
-          kubectl apply -f ${{ env.YAML_ROLLING }}
+          echo "Aplicando Rolling Update..."
+          kubectl apply -f rolling-update.yaml
           kubectl rollout status deployment/duoc-app-rolling --timeout=300s
 
-      # ❌ ESTRATEGIA: RECREATE
+      # -----------------------------------------------------------
+      # 2.2. ❌ RECREATE
+      # -----------------------------------------------------------
       - name: ❌ Ejecutar Recreate
         if: ${{ github.event.inputs.strategy == 'recreate' }}
         run: |
-          kubectl apply -f ${{ env.YAML_RECREATE }}
+          echo "Aplicando Recreate..."
+          kubectl apply -f all-in-once.yaml
           kubectl rollout status deployment/duoc-app-recreate --timeout=300s
 
-      # 🟦 ESTRATEGIA: BLUE/GREEN
+      # -----------------------------------------------------------
+      # 2.3. 🟦 BLUE/GREEN
+      # -----------------------------------------------------------
       - name: 🟦 Ejecutar Blue/Green
         if: ${{ github.event.inputs.strategy == 'blue-green' }}
         run: |
-          kubectl apply -f ${{ env.YAML_GREEN }}
-          kubectl rollout status deployment/duoc-app-green --timeout=300s
-          echo "Esperando validación de entorno Green..."
+          DEPLOYMENT_GREEN_NAME="duoc-app-green"
+          SERVICE_NAME="duoc-app-bg-service"
+          
+          echo "1. Desplegando el entorno GREEN..."
+          kubectl apply -f blue-green.yaml
+          kubectl rollout status deployment/$DEPLOYMENT_GREEN_NAME --timeout=300s
+          
+          echo "2. Ventana de observación (30 seg)..."
           sleep 30
-          kubectl patch service duoc-app-bg-service -p '{"spec": {"selector": {"version": "green"}}}'
+          
+          echo "3. Switch de tráfico: BLUE -> GREEN..."
+          kubectl patch service $SERVICE_NAME -p '{"spec": {"selector": {"version": "green"}}}'
 
-      # 🐥 ESTRATEGIA: CANARY
+      # -----------------------------------------------------------
+      # 2.4. 🐥 CANARY
+      # -----------------------------------------------------------
       - name: 🐥 Ejecutar Canary
         if: ${{ github.event.inputs.strategy == 'canary' }}
         run: |
-          kubectl apply -f ${{ env.YAML_CANARY }}
-          kubectl rollout status deployment/duoc-app-canary-v2 --timeout=300s
-          echo "Canary desplegado al 10%. Validando..."
+          DEPLOYMENT_CANARY_NAME="duoc-app-canary-v2"
+          STABLE_DEPLOYMENT_NAME="duoc-app-stable-v1"
+          TOTAL_REPLICAS=3
+          
+          echo "1. Desplegando el entorno CANARY..."
+          kubectl apply -f canary.yaml
+          kubectl rollout status deployment/$DEPLOYMENT_CANARY_NAME --timeout=300s
+          
+          echo "2. Ventana de observación (30 seg)..."
           sleep 30
-          kubectl scale deployment/duoc-app-canary-v2 --replicas=3
-          kubectl scale deployment/duoc-app-stable-v1 --replicas=0
+          
+          echo "3. PROMOCIÓN: Escalar V2 y apagar V1..."
+          kubectl scale deployment/$DEPLOYMENT_CANARY_NAME --replicas=$TOTAL_REPLICAS
+          kubectl scale deployment/$STABLE_DEPLOYMENT_NAME --replicas=0
