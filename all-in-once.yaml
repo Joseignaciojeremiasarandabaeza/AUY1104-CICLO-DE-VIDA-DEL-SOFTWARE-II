@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: duoc-app-deployment
+  name: duoc-app-recreate  # <--- Cambiado para que coincida con el pipeline
   labels:
     app: duoc-app
 spec:
@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: node-app-container
-        image: $ECR_URI_V1
+        image: nginx:latest  # <--- Cambiado de $ECR_URI_V1 a una imagen real
         ports:
         - containerPort: 3000
         imagePullPolicy: Always
@@ -35,5 +35,5 @@ spec:
   type: LoadBalancer 
   ports:
     - protocol: TCP
-      port: 80         
+      port: 80
       targetPort: 3000
