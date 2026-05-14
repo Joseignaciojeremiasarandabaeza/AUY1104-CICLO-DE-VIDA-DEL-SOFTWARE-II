@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: duoc-app-blue
+  labels:
+    app: duoc-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: duoc-app
+      version: blue # <-- Única Etiqueta: 'blue'
+  template:
+    metadata:
+      labels:
+        app: duoc-app
+        version: blue
+    spec:
+      containers:
+      - name: node-app-container
+        # ⚠️ IMAGEN ACTUAL: Versión 1.0 (Blue)
+        image: $ECR_URI_V1
+        ports:
+        - containerPort: 3000
+        imagePullPolicy: Always
+
+---
+# 2. SERVICE (LoadBalancer) - Expone la aplicación al mundo, apuntando a BLUE
+apiVersion: v1
+kind: Service
+metadata:
+  name: duoc-app-bg-service
+spec:
+  # 💡 CLAVE: Inicialmente, apunta SÓLO a los Pods etiquetados como 'blue'
+  selector:
+    version: blue 
+  type: LoadBalancer 
+  ports:
+    - protocol: TCP
+      port: 80         
+      targetPort: 3000
+---
+# 3. DEPLOYMENT GREEN (v2.0) - El nuevo entorno (inactivo para el usuario)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: duoc-app-green
+  labels:
+    app: duoc-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: duoc-app
+      version: green # <-- Única Etiqueta: 'green'
+  template:
+    metadata:
+      labels:
+        app: duoc-app
+        version: green
+    spec:
+      containers:
+      - name: node-app-container
+        # ⚠️ IMAGEN NUEVA: Versión 2.0 (Green)
+        image: $ECR_URI_V2
+        ports:
+        - containerPort: 3000
+        imagePullPolicy: Always
