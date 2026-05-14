@@ -7,18 +7,30 @@ on:
   workflow_dispatch:
     inputs:
       strategy:
-        description: 'Estrategia a Ejecutar (Debe ser: rolling-update, recreate, blue-green, o canary)'
+        description: 'Estrategia a Ejecutar (rolling-update, recreate, blue-green, canary)'
         required: true
-        type: string
-        default: 'rolling-update' # Opciones [rolling-update, recreate, canary, blue-green]
+        type: choice
+        options:
+          - rolling-update
+          - recreate
+          - blue-green
+          - canary
+        default: 'rolling-update'
       eks_cluster_name:
-        description: 'Nombre del Cluster EKS (duoc-eks-cluster-cli)'
+        description: 'Nombre del Cluster EKS'
         required: true
         default: 'duoc-eks-cluster-cli'
       aws_region:
         description: 'Región de AWS'
         required: true
-        default: 'us-east-1'
+        default: 'us-west-2'
+
+env:
+  # Define aquí las rutas reales de tus archivos en el repo
+  YAML_ROLLING: 'k8s/rolling-update.yaml'
+  YAML_RECREATE: 'k8s/recreate.yaml'
+  YAML_GREEN: 'k8s/blue-green-green.yaml'
+  YAML_CANARY: 'k8s/canary-v2.yaml'
 
 jobs:
   deploy-strategy:
@@ -30,7 +42,7 @@ jobs:
       - name: Checkout Código
         uses: actions/checkout@v4
 
-      - name: Configurar Credenciales AWS (AK/SK/Token)
+      - name: Configurar Credenciales AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -45,75 +57,58 @@ jobs:
           aws-region: ${{ github.event.inputs.aws_region }}
       
       # -----------------------------------------------------------
-      # 2.1. 🔄 ROLLING UPDATE (Comportamiento por defecto de K8s)
+      # 2.1. 🔄 ROLLING UPDATE
       # -----------------------------------------------------------
-      - name: 🔄 Ejecutar Rolling Update (Default)
-        # La condición se mantiene. Ahora compara el string que el usuario ingresó.
+      - name: 🔄 Ejecutar Rolling Update
         if: ${{ github.event.inputs.strategy == 'rolling-update' }}
         run: |
-          echo "Aplicando YAML para Rolling Update (Actualización gradual)..."
-          kubectl apply -f [K8S-YAML-PATH]
+          kubectl apply -f ${{ env.YAML_ROLLING }}
           kubectl rollout status deployment/duoc-app-rolling --timeout=300s
-          echo "✅ Rolling Update completado."
 
       # -----------------------------------------------------------
-      # 2.2. ❌ RECREATE (All-in-once)
+      # 2.2. ❌ RECREATE
       # -----------------------------------------------------------
-      - name: ❌ Ejecutar Recreate (All-in-once)
+      - name: ❌ Ejecutar Recreate
         if: ${{ github.event.inputs.strategy == 'recreate' }}
         run: |
-          echo "Aplicando YAML para Recreate (All-in-once)..."
-          kubectl apply -f [K8S-YAML-PATH]
+          kubectl apply -f ${{ env.YAML_RECREATE }}
           kubectl rollout status deployment/duoc-app-recreate --timeout=300s
-          echo "✅ Recreate completado."
           
       # -----------------------------------------------------------
-      # 2.3. 🟦 BLUE/GREEN (Switch atómico con Patch)
+      # 2.3. 🟦 BLUE/GREEN
       # -----------------------------------------------------------
-      - name: 🟦 Ejecutar Blue/Green (kubectl patch)
+      - name: 🟦 Ejecutar Blue/Green
         if: ${{ github.event.inputs.strategy == 'blue-green' }}
         run: |
-          DEPLOYMENT_GREEN_NAME="duoc-app-green"
+          # Aquí usamos variables de SHELL (sin ${{ }}) para nombres internos
+          DEPLOYMENT_GREEN="duoc-app-green"
           SERVICE_NAME="duoc-app-bg-service"
-          YAML_FILE_GREEN="[K8S-YAML-PATH]"
           
-          echo "1. Desplegando el entorno GREEN (Inactivo)..."
-          kubectl apply -f ${{ YAML_FILE_GREEN }}
-          kubectl rollout status deployment/${{ DEPLOYMENT_GREEN_NAME }} --timeout=300s
-          echo "✅ Rollout de GREEN completado."
+          echo "Desplegando entorno GREEN..."
+          kubectl apply -f ${{ env.YAML_GREEN }}
+          kubectl rollout status deployment/$DEPLOYMENT_GREEN --timeout=300s
           
-          echo "2. Ventana de Prueba/Observación (120 segundos)..."
+          echo "Esperando validación..."
           sleep 120
-          echo "✅ Prueba simulada completada."
           
-          echo "3. Ejecutando el Switch de tráfico: BLUE -> GREEN..."
-          kubectl patch service ${{ SERVICE_NAME }} -p '{"spec": {"selector": {"version": "green"}}}'
-          echo "✅ Switch de tráfico completado."
+          echo "Cambiando tráfico a GREEN..."
+          kubectl patch service $SERVICE_NAME -p '{"spec": {"selector": {"version": "green"}}}'
           
       # -----------------------------------------------------------
-      # 2.4. 🐥 CANARY (Promoción con Scale)
+      # 2.4. 🐥 CANARY
       # -----------------------------------------------------------
-      - name: 🐥 Ejecutar Canary (kubectl scale)
+      - name: 🐥 Ejecutar Canary
         if: ${{ github.event.inputs.strategy == 'canary' }}
         run: |
-          DEPLOYMENT_CANARY_NAME="duoc-app-canary-v2"
-          STABLE_DEPLOYMENT_NAME="duoc-app-stable-v1"
-          YAML_FILE_CANARY="[K8S-YAML-PATH]"
-          TOTAL_REPLICAS=3 # Asegúrate que este sea el número total de réplicas
+          CANARY_NAME="duoc-app-canary-v2"
+          STABLE_NAME="duoc-app-stable-v1"
           
-          echo "1. Desplegando el entorno CANARY (10% de tráfico)..."
-          kubectl apply -f ${{ YAML_FILE_CANARY }}
-          kubectl rollout status deployment/${{ DEPLOYMENT_CANARY_NAME }} --timeout=300s
-          echo "✅ Rollout de CANARY inicial completado."
+          echo "Desplegando versión Canary..."
+          kubectl apply -f ${{ env.YAML_CANARY }}
+          kubectl rollout status deployment/$CANARY_NAME --timeout=300s
           
-          echo "2. Ventana de Prueba/Observación (120 segundos)..."
           sleep 120
-          echo "✅ Prueba simulada completada."
           
-          echo "3. PROMOCIÓN: Escalar V2 a $TOTAL_REPLICAS y V1 a 0..."
-          kubectl scale deployment/${{ DEPLOYMENT_CANARY_NAME }} --replicas=${{ TOTAL_REPLICAS }}
-          kubectl scale deployment/${{ STABLE_DEPLOYMENT_NAME }} --replicas=0
-          
-          echo "4. Esperando el Rollout de Promoción (V2)..."
-          kubectl rollout status deployment/${{ DEPLOYMENT_CANARY_NAME }} --timeout=300s
-          echo "✅ Promoción Canary completada."
+          echo "Promocionando Canary a producción..."
+          kubectl scale deployment/$CANARY_NAME --replicas=3
+          kubectl scale deployment/$STABLE_NAME --replicas=0
