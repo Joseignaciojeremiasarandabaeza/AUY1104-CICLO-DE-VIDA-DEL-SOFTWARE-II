@@ -49,13 +49,13 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: ${{ github.event.inputs.aws_region || 'us-west-2' }}
+          aws-region: ${{ github.event.inputs.aws_region || 'us-east-1' }}
 
       - name: Configurar Kubectl para EKS
         uses: aws-actions/eks-set-context@v4
         with:
           cluster-name: ${{ github.event.inputs.eks_cluster_name || 'duoc-eks-cluster-cli' }}
-          aws-region: ${{ github.event.inputs.aws_region || 'us-west-2' }}
+          aws-region: ${{ github.event.inputs.aws_region || 'us-east-1' }}
 
       # 🔄 ROLLING UPDATE
       - name: 🔄 Ejecutar Rolling Update
