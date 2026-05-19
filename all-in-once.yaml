@@ -1,38 +1,38 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: duoc-app-recreate  # <--- Cambiado para que coincida con el pipeline
+  name: techmarket-orders-recreate
   labels:
-    app: duoc-app
+    app: techmarket-orders
 spec:
-  replicas: 1
+  replicas: 3
+  strategy: 
+    type: Recreate # Elimina de golpe la V1 antes de levantar la V2 (Genera Downtime)
   selector:
     matchLabels:
-      app: duoc-app
+      app: techmarket-orders
   template:
     metadata:
       labels:
-        app: duoc-app
+        app: techmarket-orders
     spec:
       containers:
-      - name: node-app-container
-        image: nginx:latest  # <--- Cambiado de $ECR_URI_V1 a una imagen real
+      - name: orders-container
+        image: nginx:latest
         ports:
         - containerPort: 3000
         imagePullPolicy: Always
-  strategy: 
-    type: Recreate
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: duoc-app-service
+  name: techmarket-orders-recreate-service
   labels:
-    app: duoc-app
+    app: techmarket-orders
 spec:
-  selector:
-    app: duoc-app
   type: LoadBalancer 
+  selector:
+    app: techmarket-orders
   ports:
     - protocol: TCP
       port: 80
