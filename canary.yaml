@@ -1,70 +1,75 @@
-### 1. SERVICE - Expone la Aplicación
+### 1. SERVICE - Balancea el tráfico de forma proporcional según las réplicas activas
 apiVersion: v1
 kind: Service
 metadata:
-  name: duoc-app-canary-service
+  name: techmarket-orders-canary-service
   labels:
-    app: duoc-app
+    app: techmarket-orders
 spec:
-  # Apunta a cualquier pod con 'app: duoc-app', sin importar la versión
-  selector:
-    app: duoc-app 
   type: LoadBalancer 
+  selector:
+    app: techmarket-orders # Envía tráfico a cualquier versión (stable o canary)
   ports:
     - protocol: TCP
       port: 80          
       targetPort: 3000
 
 ---
-### 2. DEPLOYMENT - Versión Estable (v1)
+### 2. DEPLOYMENT STABLE (V1) - Mantiene la base transaccional segura
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: duoc-app-stable-v1
+  name: techmarket-orders-stable-v1
   labels:
-    app: duoc-app
+    app: techmarket-orders
 spec:
-  replicas: 2 # Representa la mayoría del tráfico inicial
+  replicas: 2 # Domina la mayor parte del enrutamiento de peticiones
   selector:
     matchLabels:
-      app: duoc-app
+      app: techmarket-orders
       version: stable
   template:
     metadata:
       labels:
-        app: duoc-app
+        app: techmarket-orders
         version: stable
     spec:
       containers:
-      - name: node-app-container
-        image: nginx:1.25 # Imagen estable real
+      - name: orders-container
+        image: nginx:1.25 # Versión estable en producción
         ports:
         - containerPort: 3000
         imagePullPolicy: Always
 
 ---
-### 3. DEPLOYMENT - Versión Canary (v2)
+### 3. DEPLOYMENT CANARY (V2) - Exposición controlada del 5-10% del tráfico
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: duoc-app-canary-v2
+  name: techmarket-orders-canary-v2
   labels:
-    app: duoc-app
+    app: techmarket-orders
 spec:
-  replicas: 1 # Recibe una pequeña porción del tráfico
+  replicas: 1 # Recibe una carga menor para evaluación de telemetría y negocio
   selector:
     matchLabels:
-      app: duoc-app
+      app: techmarket-orders
       version: canary
   template:
     metadata:
       labels:
-        app: duoc-app
+        app: techmarket-orders
         version: canary
     spec:
       containers:
-      - name: node-app-container
-        image: nginx:latest # Imagen nueva (Canary) real
+      - name: orders-container
+        image: nginx:latest # Nueva versión sujeta a pruebas de estabilidad
         ports:
         - containerPort: 3000
         imagePullPolicy: Always
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
