@@ -1,70 +1,69 @@
-# 1. DEPLOYMENT BLUE (v1.0)
+# 1. DEPLOYMENT BLUE (Entorno V1 en ejecución)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: duoc-app-blue
+  name: techmarket-orders-blue
   labels:
-    app: duoc-app
+    app: techmarket-orders
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
-      app: duoc-app
+      app: techmarket-orders
       version: blue
   template:
     metadata:
       labels:
-        app: duoc-app
+        app: techmarket-orders
         version: blue
     spec:
       containers:
-      - name: node-app-container
-        # Cambiado de $ECR_URI_V1 a imagen real
+      - name: orders-container
         image: nginx:1.25
         ports:
         - containerPort: 3000
         imagePullPolicy: Always
 
 ---
-# 2. SERVICE (LoadBalancer)
+# 2. SERVICE - El "Puntero" que el pipeline manipula de forma inmediata
 apiVersion: v1
 kind: Service
 metadata:
-  name: duoc-app-bg-service
+  name: techmarket-orders-bg-service
+  labels:
+    app: techmarket-orders
 spec:
-  selector:
-    # Este es el selector que el pipeline cambiará de 'blue' a 'green'
-    app: duoc-app
-    version: blue 
   type: LoadBalancer 
+  selector:
+    app: techmarket-orders
+    version: blue # El pipeline altera este tag a 'green' con un kubectl patch
   ports:
     - protocol: TCP
       port: 80          
       targetPort: 3000
 
 ---
-# 3. DEPLOYMENT GREEN (v2.0)
+# 3. DEPLOYMENT GREEN (Entorno V2 aislado para pruebas de humo)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: duoc-app-green
+  name: techmarket-orders-green
   labels:
-    app: duoc-app
+    app: techmarket-orders
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
-      app: duoc-app
+      app: techmarket-orders
       version: green
   template:
     metadata:
       labels:
-        app: duoc-app
+        app: techmarket-orders
         version: green
     spec:
       containers:
-      - name: node-app-container
-        # Cambiado de $ECR_URI_V2 a imagen real (un tag distinto para notar el cambio)
+      - name: orders-container
         image: nginx:latest
         ports:
         - containerPort: 3000
