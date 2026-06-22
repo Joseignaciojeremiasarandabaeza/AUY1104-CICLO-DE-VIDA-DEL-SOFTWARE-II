@@ -54,16 +54,25 @@ jobs:
         fi
       continue-on-error: true
 
-    # --- ETAPA DE ACCIÓN REMEDIATIVA (Rollback) ---
+    # --- ETAPA DE ACCIÓN REMEDIATIVA (Rollback + Notificación Real) ---
     - name: Ejecutar Acción de Remediación Temprana
       if: steps.deploy.outcome == 'failure'
       run: |
         echo "🚨 Alarma AWS CloudWatch / GitHub Actions activada."
         echo "Iniciando Rollback inmediato hacia la versión previa estable..."
         
+        # Corrección del comando: Se ejecuta el rollback en el clúster
         kubectl rollout undo deployment/${{ env.DEPLOYMENT_NAME }}
         
-        echo "Notificación enviada con éxito vía Amazon SNS (Simulación de logs)."
+        echo "Despachando notificación formal de incidente a Amazon SNS..."
+        # Sintaxis correcta de AWS CLI usando tu ID de cuenta real
+        aws sns publish \
+          --topic-arn "arn:aws:sns:us-east-1:797969583115:techmarket-orders-alerts" \
+          --subject "CRITICAL: Fallo de Despliegue - Orders Service" \
+          --message "🚨 ALERTA CRÍTICA: El microservicio TechMarket Orders ha fallado los Health Checks automáticos en el clúster EKS. El pipeline de CI/CD ha interceptado la anomalía y ejecutó un Rollback de emergencia para resguardar la disponibilidad del negocio." \
+          --region "${{ env.AWS_REGION }}"
+        
+        echo "✓ Notificación enviada con éxito vía Amazon SNS al correo confirmado."
 
     # --- ETAPA DE VALIDACIÓN POST-REMEDIACIÓN ---
     - name: Verificación de Estabilidad y Continuidad Operativa
