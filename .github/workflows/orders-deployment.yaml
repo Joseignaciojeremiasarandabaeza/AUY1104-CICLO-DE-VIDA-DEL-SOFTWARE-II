@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: techmarket-orders-deployment
+  labels:
+    app: techmarket-orders
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: techmarket-orders
+  template:
+    metadata:
+      labels:
+        app: techmarket-orders
+    spec:
+      containers:
+      - name: orders-service
+        image: nginx:latest
+        ports:
+        - containerPort: 3000
+        imagePullPolicy: Always
+        # --- Configuración Crítica de Detección de Fallas ---
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5

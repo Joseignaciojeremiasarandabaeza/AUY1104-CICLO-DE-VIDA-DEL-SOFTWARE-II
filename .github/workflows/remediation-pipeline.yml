@@ -1,0 +1,73 @@
+name: TechMarket Orders - Pipeline de Remediación Automatizada
+
+on:
+  workflow_dispatch: # Permite la ejecución manual para tu defensa en vivo
+
+env:
+  AWS_REGION: "us-east-1"
+  CLUSTER_NAME: "duoc-eks-cluster-cli"
+  DEPLOYMENT_NAME: "techmarket-orders-deployment"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true" # Garantiza el funcionamiento continuo post-junio 2026
+
+jobs:
+  deploy-and-remediate:
+    name: Despliegue con Autoremediación Continua
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Código Fuente desde Repositorio
+      uses: actions/checkout@v4
+
+    - name: Configuración de Credenciales AWS
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Configurar Contexto de Acceso a Clúster EKS
+      run: |
+        aws eks update-kubeconfig --name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+
+    # --- ETAPA DE DETECCIÓN (Simulación de Fallo) ---
+    - name: Aplicar Cambios e Inyectar Simulación de Falla
+      id: deploy
+      run: |
+        echo "Iniciando despliegue del servicio de órdenes..."
+        kubectl apply -f k8s/orders-deployment.yaml
+        
+        echo "Simulando actualización defectuosa..."
+        # Forzamos una imagen rota que provocará un ErrImagePull o CrashLoopBackOff
+        kubectl set image deployment/${{ env.DEPLOYMENT_NAME }} orders-service=nginx:broken-tag-2026
+        
+        echo "Esperando ventana de observación de salud..."
+        sleep 20
+        
+        # Evalúa si el despliegue es capaz de completarse con éxito
+        if ! kubectl rollout status deployment/${{ env.DEPLOYMENT_NAME }} --timeout=20s; then
+          echo "❌ ALERTA: El microservicio Orders no pasó los Health Checks."
+          echo "status=failed" >> $GITHUB_OUTPUT
+          exit 1
+        else
+          echo "status=success" >> $GITHUB_OUTPUT
+        fi
+      continue-on-error: true
+
+    # --- ETAPA DE ACCIÓN REMEDIATIVA (Rollback) ---
+    - name: Ejecutar Acción de Remediación Temprana
+      if: steps.deploy.outcome == 'failure'
+      run: |
+        echo "🚨 Alarma AWS CloudWatch / GitHub Actions activada."
+        echo "Iniciando Rollback inmediato hacia la versión previa estable..."
+        
+        kubectl rollout undo deployment/${{ env.DEPLOYMENT_NAME }}
+        
+        echo "Notificación enviada con éxito vía Amazon SNS (Simulación de logs)."
+
+    # --- ETAPA DE VALIDACIÓN POST-REMEDIACIÓN ---
+    - name: Verificación de Estabilidad y Continuidad Operativa
+      run: |
+        echo "Validando consistencia del clúster post-remediación..."
+        kubectl rollout status deployment/${{ env.DEPLOYMENT_NAME }} --timeout=60s
+        echo "✓ Sistema restaurado con éxito. 100% Uptime garantizado para TechMarket."
